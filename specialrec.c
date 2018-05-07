@@ -10,14 +10,12 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define SAMPLING 24100
 #define FRAMING 32
 
-// nc -l 2234 -u
-// nc -u localhost 2334
-
-char * adresa = "192.168.1.14";
+char * adresa = "192.168.1.19";
 int cielport = 3333;
 int moj_port = 3333;
 
@@ -121,6 +119,7 @@ int main()
     int rc, sound_buffer_size = 4 * FRAMING;
     char *sound_buffer = (char *) malloc(sound_buffer_size);
     
+    bool nahravam = false;
     int offset;
     char mega[1000000];
     while (1)
@@ -132,7 +131,7 @@ int main()
         if(ret > 0)// program skonci pri stlaceni klavesu
         {
             read( fileno( stdin ), &x, 1 );
-            break;
+            nahravam = !nahravam;
         }
         
         rc = snd_pcm_readi(cap_handle, sound_buffer, frames);
@@ -149,10 +148,10 @@ int main()
         }
         else if (rc != (int)frames) fprintf(stderr, "short read, read %d frames\n", rc);
     
-        rc = write(1, sound_buffer, sound_buffer_size);
+        //rc = write(1, sound_buffer, sound_buffer_size);
         if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
         
-        //sendto(send_desc, sound_buffer, sound_buffer_size, 0, (struct sockaddr *)&komu , komulen);
+        if(nahravam) sendto(send_desc, sound_buffer, sound_buffer_size, 0, (struct sockaddr *)&komu , komulen);
         
         fd_set rec_set;
 
