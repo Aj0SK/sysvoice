@@ -17,10 +17,9 @@
 // nc -l 2234 -u
 // nc -u localhost 2334
 
-int rec_desc, send_desc;
-char * adresa = "127.0.0.1";
-int cielport = 2234;
-int moj_port = 2334;
+char * adresa = "192.168.1.14";
+int cielport = 3333;
+int moj_port = 3333;
 
 struct termios saved_attributes;
 
@@ -39,8 +38,7 @@ void reset_input_mode(void)
     tcsetattr( fileno( stdin ), TCSANOW, &saved_attributes);
 }
 
-
-void f(snd_pcm_t **handle)
+void f(snd_pcm_t **handle, snd_pcm_stream_t type)
 {
     unsigned int sampling_rate = SAMPLING;
     int rc, dir;
@@ -48,7 +46,7 @@ void f(snd_pcm_t **handle)
     snd_pcm_hw_params_t *params;
     snd_pcm_uframes_t frames = FRAMING;
     
-    rc = snd_pcm_open(&(*handle), "default", SND_PCM_STREAM_CAPTURE, 0);
+    rc = snd_pcm_open(&(*handle), "default", type, 0);
     if (rc < 0)
     {
         fprintf(stderr, "unable to open pcm device: %s\n", snd_strerror(rc));
@@ -73,15 +71,17 @@ void f(snd_pcm_t **handle)
     
     snd_pcm_hw_params_get_period_size(params, &frames, &dir);
     snd_pcm_hw_params_get_period_time(params, &sampling_rate, &dir);
-    
 }
 
 int main()
 {
-    snd_pcm_t *handle;
+    int rec_desc, send_desc;
+    
+    snd_pcm_t *cap_handle, *play_handle;
     snd_pcm_uframes_t frames = FRAMING;
     
-    f(&handle);
+    f(&play_handle, SND_PCM_STREAM_PLAYBACK);
+    f(&cap_handle, SND_PCM_STREAM_CAPTURE);
     
     //////////////////////siet
     
@@ -92,7 +92,7 @@ int main()
     komu.sin_port = htons( cielport );
     socklen_t komulen = sizeof(komu);
 
-    rec_desc = socket( PF_INET , SOCK_DGRAM, 0);
+    rec_desc = socket(PF_INET , SOCK_DGRAM, 0);
     struct sockaddr_in me;
     me.sin_family = AF_INET;
     me.sin_addr.s_addr = INADDR_ANY;
@@ -121,28 +121,26 @@ int main()
     int rc, sound_buffer_size = 4 * FRAMING;
     char *sound_buffer = (char *) malloc(sound_buffer_size);
     
+    int offset;
+    char mega[1000000];
     while (1)
     {
         fd_set set;
-
         FD_ZERO(&set);
         FD_SET(fileno(stdin), &set );
-
         int ret = select( fileno( stdin )+1, &set, NULL, NULL, &tv );
-
-        if(ret > 0)
+        if(ret > 0)// program skonci pri stlaceni klavesu
         {
-            fprintf(fp, "je to dobre stlacene %c\n", x);
             read( fileno( stdin ), &x, 1 );
             break;
         }
         
-        rc = snd_pcm_readi(handle, sound_buffer, frames);
+        rc = snd_pcm_readi(cap_handle, sound_buffer, frames);
         
         if (rc == -EPIPE)
         {
             fprintf(stderr, "overrun occurred\n");
-            snd_pcm_prepare(handle);
+            snd_pcm_prepare(cap_handle);
         } 
         else if (rc < 0) 
         {
@@ -152,6 +150,7 @@ int main()
         else if (rc != (int)frames) fprintf(stderr, "short read, read %d frames\n", rc);
     
         rc = write(1, sound_buffer, sound_buffer_size);
+        if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
         
         //sendto(send_desc, sound_buffer, sound_buffer_size, 0, (struct sockaddr *)&komu , komulen);
         
@@ -161,22 +160,31 @@ int main()
         FD_SET(rec_desc, &rec_set );
         
         ret = select( rec_desc+1, &rec_set, NULL, NULL, &tv );
-        
         if(ret > 0)
         {
-            char buf[1001];
-            ret = recvfrom(rec_desc, buf, 1000, 0, (struct sockaddr*)&odkial, &velkost);
-            buf[ret]=0;
-            fprintf(stderr, "Od [%s] som dostal som \"%s\"\n",inet_ntoa(odkial.sin_addr),buf);
-            break;
+            ret = recvfrom(rec_desc, mega, 4*FRAMING, 0, (struct sockaddr*)&odkial, &velkost);
+            mega[ret] = 0;
+            
+            fprintf(stderr, "Prijmam data %d\n", ret);
+            
+            rc = snd_pcm_writei(play_handle, mega, frames);
+            
+            if (rc == -EPIPE)
+            {
+                fprintf(stderr, "underrun occurred\n");
+                snd_pcm_prepare(play_handle);
+            }
+            else if (rc < 0) fprintf(stderr, "error from writei: %s\n", snd_strerror(rc));
+            else if (rc != (int)frames) fprintf(stderr, "short write, write %d frames\n", rc);
         }
 
-        if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
     }
-    
+
     reset_input_mode();
-    snd_pcm_drain(handle);
-    snd_pcm_close(handle);
+    snd_pcm_drain(cap_handle);
+    snd_pcm_close(cap_handle);
+    snd_pcm_drain(play_handle);
+    snd_pcm_close(play_handle);
     free(sound_buffer);
     fclose(fp);
     
