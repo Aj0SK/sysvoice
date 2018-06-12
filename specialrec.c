@@ -12,12 +12,11 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define SAMPLING 24100
-#define FRAMING 32
+#define SAMPLING 24000
+#define FRAMING 16
 
-char * adresa = "192.168.1.19";
-int cielport = 3333;
-int moj_port = 3333;
+char * adresa = NULL;
+int port = 3333;
 
 struct termios saved_attributes;
 
@@ -71,8 +70,20 @@ void f(snd_pcm_t **handle, snd_pcm_stream_t type)
     snd_pcm_hw_params_get_period_time(params, &sampling_rate, &dir);
 }
 
-int main()
+int main(int argc, char **argv)
 {
+    if(argc < 2)
+    {
+        fprintf(stderr, "Maly pocet parametrov. Zadajte prosim cielovu IP adresu.");
+        exit(1);
+    }
+    else adresa = argv[1];
+    
+    if(argc > 2)
+    {
+        port = atoi(argv[2]);
+    }
+    
     int rec_desc, send_desc;
     
     snd_pcm_t *cap_handle, *play_handle;
@@ -87,21 +98,23 @@ int main()
     struct sockaddr_in komu;
     komu.sin_family = AF_INET;
     komu.sin_addr.s_addr = inet_addr(adresa);
-    komu.sin_port = htons( cielport );
+    komu.sin_port = htons( port );
     socklen_t komulen = sizeof(komu);
 
     rec_desc = socket(PF_INET , SOCK_DGRAM, 0);
     struct sockaddr_in me;
     me.sin_family = AF_INET;
     me.sin_addr.s_addr = INADDR_ANY;
-    me.sin_port = htons(moj_port);
+    me.sin_port = htons(port);
     
     if ( bind(rec_desc,  (struct sockaddr*)&me, sizeof(me) )  == -1)
     {
-        perror("Neuspesny bind.");
+        fprintf(stderr, "Neuspesny bind.");
         exit(1);
     }
 
+    fprintf(stderr, "Pripojeny na %s cez port %d\n", adresa, port);
+    
     struct sockaddr_in odkial;
     socklen_t velkost = sizeof(odkial);
 
@@ -120,15 +133,15 @@ int main()
     char *sound_buffer = (char *) malloc(sound_buffer_size);
     
     bool nahravam = false;
-    int offset;
     char mega[1000000];
+    
     while (1)
     {
         fd_set set;
         FD_ZERO(&set);
         FD_SET(fileno(stdin), &set );
         int ret = select( fileno( stdin )+1, &set, NULL, NULL, &tv );
-        if(ret > 0)// program skonci pri stlaceni klavesu
+        if(ret > 0) // program nahrava/nenahrava pri stlaceni klavesu
         {
             read( fileno( stdin ), &x, 1 );
             nahravam = !nahravam;
@@ -148,7 +161,7 @@ int main()
         }
         else if (rc != (int)frames) fprintf(stderr, "short read, read %d frames\n", rc);
     
-        //rc = write(1, sound_buffer, sound_buffer_size);
+        rc = write(1, sound_buffer, sound_buffer_size);
         if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
         
         if(nahravam) sendto(send_desc, sound_buffer, sound_buffer_size, 0, (struct sockaddr *)&komu , komulen);
@@ -163,8 +176,6 @@ int main()
         {
             ret = recvfrom(rec_desc, mega, 4*FRAMING, 0, (struct sockaddr*)&odkial, &velkost);
             mega[ret] = 0;
-            
-            fprintf(stderr, "Prijmam data %d\n", ret);
             
             rc = snd_pcm_writei(play_handle, mega, frames);
             
