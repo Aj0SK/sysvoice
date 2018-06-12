@@ -19,20 +19,32 @@ char * adresa = NULL;
 int port = 3333;
 
 struct termios saved_attributes;
+int er;
+
+void show_error(char * message)
+{
+    fprintf(stderr, "FATAL ERROR !!! : %s\n", message);
+    exit(1);
+}
 
 void set_input_mode(void)
 {
     struct termios newSettings;
 
-    tcgetattr(fileno(stdin), &saved_attributes);
+    er = tcgetattr(fileno(stdin), &saved_attributes);
+    if(er == -1) show_error("Nastala chyba pri ziskavani parametrov terminalu.");
+    
     newSettings = saved_attributes;
     newSettings.c_lflag &= (~ICANON & ~ECHO);
-    tcsetattr(fileno(stdin), TCSANOW, &newSettings);
+    
+    er = tcsetattr(fileno(stdin), TCSANOW, &newSettings);
+    if(er == -1) show_error("Nastala chyba pri ziskavani parametrov terminalu.");
 }
 
 void reset_input_mode(void)
 {
-    tcsetattr( fileno( stdin ), TCSANOW, &saved_attributes);
+    er = tcsetattr( fileno( stdin ), TCSANOW, &saved_attributes);
+    if(er == -1) show_error("Nastala chyba pri nastavovani parametrov terminalu.\n");
 }
 
 void f(snd_pcm_t **handle, snd_pcm_stream_t type)
@@ -46,7 +58,7 @@ void f(snd_pcm_t **handle, snd_pcm_stream_t type)
     rc = snd_pcm_open(&(*handle), "default", type, 0);
     if (rc < 0)
     {
-        fprintf(stderr, "unable to open pcm device: %s\n", snd_strerror(rc));
+        fprintf(stderr, "SOUND : unable to open pcm device: %s\n", snd_strerror(rc));
         exit(1);
     }
 
@@ -62,7 +74,7 @@ void f(snd_pcm_t **handle, snd_pcm_stream_t type)
 
     if (rc < 0)
     {
-        fprintf(stderr, "unable to set hw parameters: %s\n", snd_strerror(rc));
+        fprintf(stderr, "SOUND : unable to set hw parameters: %s\n", snd_strerror(rc));
         exit(1);
     }
     
@@ -72,17 +84,9 @@ void f(snd_pcm_t **handle, snd_pcm_stream_t type)
 
 int main(int argc, char **argv)
 {
-    if(argc < 2)
-    {
-        fprintf(stderr, "Maly pocet parametrov. Zadajte prosim cielovu IP adresu.");
-        exit(1);
-    }
+    if(argc < 2) show_error("Maly pocet parametrov. Zadajte prosim cielovu IP adresu.");
     else adresa = argv[1];
-    
-    if(argc > 2)
-    {
-        port = atoi(argv[2]);
-    }
+    if(argc > 2) port = atoi(argv[2]);
     
     int rec_desc, send_desc;
     
@@ -107,13 +111,9 @@ int main(int argc, char **argv)
     me.sin_addr.s_addr = INADDR_ANY;
     me.sin_port = htons(port);
     
-    if ( bind(rec_desc,  (struct sockaddr*)&me, sizeof(me) )  == -1)
-    {
-        fprintf(stderr, "Neuspesny bind.");
-        exit(1);
-    }
+    if ( bind(rec_desc,  (struct sockaddr*)&me, sizeof(me) )  == -1) show_error("Neuspesny bind.");
 
-    fprintf(stderr, "Pripojeny na %s cez port %d\n", adresa, port);
+    printf("Pripojeny na %s cez port %d\n", adresa, port);
     
     struct sockaddr_in odkial;
     socklen_t velkost = sizeof(odkial);
@@ -126,14 +126,13 @@ int main(int argc, char **argv)
     tv.tv_sec = 0;
     tv.tv_usec = 0;
     
-    FILE *fp = fopen("error.txt", "wb");
     unsigned char x;
     
     int rc, sound_buffer_size = 4 * FRAMING;
     char *sound_buffer = (char *) malloc(sound_buffer_size);
     
     bool nahravam = false;
-    char mega[1000000];
+    char mega[100000];
     
     while (1)
     {
@@ -151,18 +150,18 @@ int main(int argc, char **argv)
         
         if (rc == -EPIPE)
         {
-            fprintf(stderr, "overrun occurred\n");
+            fprintf(stderr, "SOUND : overrun occurred\n");
             snd_pcm_prepare(cap_handle);
         } 
         else if (rc < 0) 
         {
-            fprintf(stderr, "error from read: %s\n",
+            fprintf(stderr, "SOUND : error from read: %s\n",
             snd_strerror(rc));
         }
-        else if (rc != (int)frames) fprintf(stderr, "short read, read %d frames\n", rc);
+        else if (rc != (int)frames) fprintf(stderr, "SOUND : short read, read %d frames\n", rc);
     
-        rc = write(1, sound_buffer, sound_buffer_size);
-        if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
+        //rc = write(1, sound_buffer, sound_buffer_size);
+        //if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
         
         if(nahravam) sendto(send_desc, sound_buffer, sound_buffer_size, 0, (struct sockaddr *)&komu , komulen);
         
@@ -181,11 +180,11 @@ int main(int argc, char **argv)
             
             if (rc == -EPIPE)
             {
-                fprintf(stderr, "underrun occurred\n");
+                fprintf(stderr, "SOUND : underrun occurred\n");
                 snd_pcm_prepare(play_handle);
             }
-            else if (rc < 0) fprintf(stderr, "error from writei: %s\n", snd_strerror(rc));
-            else if (rc != (int)frames) fprintf(stderr, "short write, write %d frames\n", rc);
+            else if (rc < 0) fprintf(stderr, "SOUND : error from writei: %s\n", snd_strerror(rc));
+            else if (rc != (int)frames) fprintf(stderr, "SOUND : short write, write %d frames\n", rc);
         }
 
     }
@@ -196,7 +195,6 @@ int main(int argc, char **argv)
     snd_pcm_drain(play_handle);
     snd_pcm_close(play_handle);
     free(sound_buffer);
-    fclose(fp);
     
     close(send_desc);
     close(rec_desc);
