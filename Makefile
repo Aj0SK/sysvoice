@@ -4,4 +4,7 @@ clean:
 	rm *.out
 
 program:
-	$(CFLAGS) program.c -lasound -o program.out && ./program.out 192.168.1.29 3334
+	$(CFLAGS) program.c -lasound -o program.out
+
+run:	program
+	./program.out 192.168.1.29 3334
