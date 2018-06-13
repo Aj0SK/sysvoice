@@ -12,8 +12,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define SAMPLING 24000
-#define FRAMING 16
+int SAMPLING = 24000;
+int FRAMING = 16;
 
 char * adresa = NULL;
 int port = 3333;
@@ -70,6 +70,9 @@ void f(snd_pcm_t **handle, snd_pcm_stream_t type)
     snd_pcm_hw_params_set_rate_near((*handle), params, &sampling_rate, &dir);
     snd_pcm_hw_params_set_period_size_near((*handle), params, &frames, &dir);
 
+    FRAMING = frames;
+    SAMPLING = sampling_rate;
+    
     rc = snd_pcm_hw_params((*handle), params);
 
     if (rc < 0)
@@ -77,6 +80,9 @@ void f(snd_pcm_t **handle, snd_pcm_stream_t type)
         fprintf(stderr, "SOUND : unable to set hw parameters: %s\n", snd_strerror(rc));
         exit(1);
     }
+
+    printf("Realne parametre zvuku su : SAMPLES(%d) a FRAMES(%d) pre %s\n", SAMPLING, FRAMING, 
+           (type == SND_PCM_STREAM_PLAYBACK)?("prehravanie"):("nahravanie"));
     
     snd_pcm_hw_params_get_period_size(params, &frames, &dir);
     snd_pcm_hw_params_get_period_time(params, &sampling_rate, &dir);
@@ -91,7 +97,7 @@ int main(int argc, char **argv)
     int rec_desc, send_desc;
     
     snd_pcm_t *cap_handle, *play_handle;
-    snd_pcm_uframes_t frames = FRAMING;
+
     
     f(&play_handle, SND_PCM_STREAM_PLAYBACK);
     f(&cap_handle, SND_PCM_STREAM_CAPTURE);
@@ -113,7 +119,7 @@ int main(int argc, char **argv)
     
     if ( bind(rec_desc,  (struct sockaddr*)&me, sizeof(me) )  == -1) show_error("Neuspesny bind.");
 
-    printf("Pripojeny na %s cez port %d\n", adresa, port);
+    printf("Pripojeny na %s cez port %d, ukoncite klavesom q\n", adresa, port);
     
     struct sockaddr_in odkial;
     socklen_t velkost = sizeof(odkial);
@@ -128,12 +134,13 @@ int main(int argc, char **argv)
     
     unsigned char x;
     
-    int rc, sound_buffer_size = 4 * FRAMING;
+    int rc, sound_buffer_size = 2 * 2 * FRAMING;
     char *sound_buffer = (char *) malloc(sound_buffer_size);
     
     bool nahravam = false;
-    char mega[100000];
+    char mega[sound_buffer_size];
     
+    int counter = 0;
     while (1)
     {
         fd_set set;
@@ -143,10 +150,17 @@ int main(int argc, char **argv)
         if(ret > 0) // program nahrava/nenahrava pri stlaceni klavesu
         {
             read( fileno( stdin ), &x, 1 );
+            
+            if(x == 'q') // ukoncenie programu pri stlaceni q
+            {
+                printf("Ukoncujem program.\n");
+                break;
+            }
+            
             nahravam = !nahravam;
         }
         
-        rc = snd_pcm_readi(cap_handle, sound_buffer, frames);
+        rc = snd_pcm_readi(cap_handle, sound_buffer, FRAMING);
         
         if (rc == -EPIPE)
         {
@@ -158,7 +172,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "SOUND : error from read: %s\n",
             snd_strerror(rc));
         }
-        else if (rc != (int)frames) fprintf(stderr, "SOUND : short read, read %d frames\n", rc);
+        else if (rc != FRAMING) fprintf(stderr, "SOUND : short read, read %d frames\n", rc);
     
         //rc = write(1, sound_buffer, sound_buffer_size);
         //if (rc != sound_buffer_size) fprintf(stderr, "short write: wrote %d bytes\n", rc);
@@ -173,10 +187,10 @@ int main(int argc, char **argv)
         ret = select( rec_desc+1, &rec_set, NULL, NULL, &tv );
         if(ret > 0)
         {
-            ret = recvfrom(rec_desc, mega, 4*FRAMING, 0, (struct sockaddr*)&odkial, &velkost);
-            mega[ret] = 0;
+            ret = recvfrom(rec_desc, mega, sound_buffer_size, 0, (struct sockaddr*)&odkial, &velkost);
+            if(ret == -1 ) continue;
             
-            rc = snd_pcm_writei(play_handle, mega, frames);
+            rc = snd_pcm_writei(play_handle, mega, FRAMING);
             
             if (rc == -EPIPE)
             {
@@ -184,7 +198,7 @@ int main(int argc, char **argv)
                 snd_pcm_prepare(play_handle);
             }
             else if (rc < 0) fprintf(stderr, "SOUND : error from writei: %s\n", snd_strerror(rc));
-            else if (rc != (int)frames) fprintf(stderr, "SOUND : short write, write %d frames\n", rc);
+            else if (rc != FRAMING) fprintf(stderr, "SOUND : short write, write %d frames\n", rc);
         }
 
     }
