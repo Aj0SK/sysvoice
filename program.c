@@ -140,7 +140,6 @@ int main(int argc, char **argv)
     bool nahravam = false;
     char mega[sound_buffer_size];
     
-    int counter = 0;
     while (1)
     {
         fd_set set;
